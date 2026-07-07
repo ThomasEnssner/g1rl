@@ -1,11 +1,15 @@
 {
     "$schema": "https://getcomposer.org/schema.json",
-    "name": "laravel/livewire-starter-kit",
+    "name": "thomasenssner/g1rl",
     "type": "project",
-    "description": "The official Laravel starter kit for Livewire.",
+    "description": "Open source solver for the lockpicking mini game in Gothic 1 Remake.",
     "keywords": [
+        "gothic",
+        "lockpicking",
+        "solver",
+        "bfs",
         "laravel",
-        "framework"
+        "livewire"
     ],
     "license": "MIT",
     "require": {

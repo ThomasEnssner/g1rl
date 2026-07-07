@@ -130,14 +130,15 @@ test('it visits every reachable state only once', function () {
 
 test('it solves a real difficulty 4 lock from the game', function () {
     // Observed in Gothic 1 Remake by chaining moves from start state 156262:
-    // P1> 245251, P2> 255251, P3< 254252, P4> 254361, P5> 254251, P6< 254152.
+    // P1> 245251, P2> 255251, P3< 254252, P4> 254361, P5< 254251, P6> 254152.
+    // Rows are the ">" direction: Pn> always raises plate n itself by 1.
     $rows = [
         'P1' => [1, -1, -1, 0, -1, -1],
         'P2' => [0, 1, 0, 0, 0, 0],
         'P3' => [0, 0, 1, 0, 0, -1],
         'P4' => [0, 0, 0, 1, 1, -1],
-        'P5' => [0, 0, 0, -1, -1, 0],
-        'P6' => [0, 0, 0, 1, 0, -1],
+        'P5' => [0, 0, 0, 1, 1, 0],
+        'P6' => [0, 0, 0, -1, 0, 1],
     ];
 
     $moves = [];
