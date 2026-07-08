@@ -34,19 +34,19 @@ final class Solver implements SolverInterface
      * backwards (from a state towards the target) is exactly the mirrored
      * move applied forwards, including the 1..7 bounds check.
      *
-     * The search runs on plain int arrays and int-encoded states instead of
-     * State objects: the hot loop touches over a million edges, where object
-     * allocation and re-validation would dominate the runtime.
+     * The search never touches State objects: a state is encoded as an int
+     * with 3 bits per plate, so a mirrored move becomes a plain int offset
+     * and only the plates it actually shifts need a bounds check on their
+     * extracted 3-bit value. Distances live in one packed byte string
+     * indexed by state code - a 7-plate lock needs 2 MB instead of an
+     * 800k-entry hash map. The hot loop touches millions of edges, where
+     * object allocation and re-validation would dominate the runtime.
      */
     public function map(Lock $lock): DistanceMap
     {
         $pinCount = $lock->startState->pinCount();
         $target = new State(array_fill(0, $pinCount, State::TARGET_PIN));
 
-        // A state is encoded as a decimal int, one digit per plate (e.g.
-        // 156262). A mirrored move then becomes a plain int offset, and only
-        // the plates it actually shifts need a 1..7 bounds check on their
-        // extracted digit.
         $moveTable = [];
 
         foreach ($lock->moves as $move) {
@@ -54,31 +54,39 @@ final class Solver implements SolverInterface
             $checks = [];
 
             foreach ($move->delta as $index => $delta) {
-                $power = 10 ** ($pinCount - 1 - $index);
-                $offset -= $delta * $power;
-
                 if ($delta !== 0) {
-                    $checks[] = [$power, -$delta];
+                    $shift = 3 * $index;
+                    $offset -= $delta << $shift;
+                    $checks[] = [$shift, -$delta];
                 }
             }
 
             $moveTable[] = [$offset, $checks];
         }
 
-        /** @var array<int, int> $distances int-encoded state => moves to the target */
-        $distances = [(int) $target->hash() => 0];
-        $queue = [(int) $target->hash()];
+        $targetCode = DistanceMap::encode($target);
 
+        $distances = str_repeat(DistanceMap::UNREACHABLE, 1 << (3 * $pinCount));
+        $distances[$targetCode] = "\x00";
+
+        $queue = [$targetCode];
+        $stateCount = 1;
         $iterations = 0;
 
         for ($head = 0; isset($queue[$head]); $head++) {
             $code = $queue[$head];
-            $distance = $distances[$code];
+            $distance = ord($distances[$code]);
             $iterations++;
 
+            if ($distance >= 254) {
+                throw new \LogicException('Shortest paths beyond 254 moves are not supported.');
+            }
+
+            $nextDistance = chr($distance + 1);
+
             foreach ($moveTable as [$offset, $checks]) {
-                foreach ($checks as [$power, $delta]) {
-                    $value = intdiv($code, $power) % 10 + $delta;
+                foreach ($checks as [$shift, $delta]) {
+                    $value = (($code >> $shift) & 7) + $delta;
 
                     if ($value < State::MIN_PIN || $value > State::MAX_PIN) {
                         continue 2;
@@ -87,15 +95,16 @@ final class Solver implements SolverInterface
 
                 $next = $code + $offset;
 
-                if (isset($distances[$next])) {
+                if ($distances[$next] !== DistanceMap::UNREACHABLE) {
                     continue;
                 }
 
-                $distances[$next] = $distance + 1;
+                $distances[$next] = $nextDistance;
                 $queue[] = $next;
+                $stateCount++;
             }
         }
 
-        return new DistanceMap($target, $distances, $iterations);
+        return new DistanceMap($target, $distances, $iterations, $stateCount);
     }
 }

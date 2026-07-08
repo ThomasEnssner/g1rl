@@ -17,7 +17,7 @@ of moves that opens the lock.
 
 ## The game model
 
-- A lock has **4–6 plates**. Every plate sits in one of **7 positions** (1–7).
+- A lock has **4–7 plates**. Every plate sits in one of **7 positions** (1–7).
 - The lock opens when **every plate is at the middle position 4**.
 - Each pick position `Pn` can be pushed right (`Pn>`) or left (`Pn<`):
   - `Pn>` always raises plate *n* itself by exactly 1 and may shift other

@@ -73,8 +73,19 @@ test('it rejects an invalid start state', function (string $startPins) {
     'letters' => '74a317',
     'digit out of range' => '748317',
     'too few plates' => '444',
-    'too many plates' => '4444444',
+    'too many plates' => '44444444',
 ]);
+
+test('it accepts locks with seven plates', function () {
+    Livewire::test('pages::lock-picker')
+        ->set('startPins', '1444444')
+        ->assertCount('moves', 7)
+        ->set('moves.0', [1, 0, 0, 0, 0, 0, 0])
+        ->call('solve')
+        ->assertHasNoErrors()
+        ->assertSet('solutions.0.solvable', true)
+        ->assertSet('solutions.0.moves', ['P1>', 'P1>', 'P1>']);
+});
 
 test('it requires at least one observed move', function () {
     Livewire::test('pages::lock-picker')

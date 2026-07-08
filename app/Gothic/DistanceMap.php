@@ -10,31 +10,54 @@ use LogicException;
  * Shortest distances from every reachable state to the target state,
  * produced by a single breadth first search backwards from the target.
  * One map answers shortest-path queries for any number of start states.
+ *
+ * Distances are stored in one packed byte string indexed by the state's
+ * 3-bits-per-plate int encoding - compact enough for 7-plate locks.
  */
 final readonly class DistanceMap
 {
-    /**
-     * @param  array<int, int>  $distances  int-encoded state hash => moves to the target
-     */
+    public const string UNREACHABLE = "\xff";
+
     public function __construct(
         public State $target,
-        private array $distances,
+        private string $distances,
         public int $iterations,
+        private int $stateCount,
     ) {}
+
+    /**
+     * Encodes a state as an int with 3 bits per plate (values 1..7).
+     */
+    public static function encode(State $state): int
+    {
+        $code = 0;
+
+        foreach ($state->pins as $index => $pin) {
+            $code |= $pin << (3 * $index);
+        }
+
+        return $code;
+    }
 
     public function distanceTo(State $state): ?int
     {
-        return $this->distances[(int) $state->hash()] ?? null;
+        if ($state->pinCount() !== $this->target->pinCount()) {
+            return null;
+        }
+
+        $byte = $this->distances[self::encode($state)];
+
+        return $byte === self::UNREACHABLE ? null : ord($byte);
     }
 
     public function contains(State $state): bool
     {
-        return isset($this->distances[(int) $state->hash()]);
+        return $this->distanceTo($state) !== null;
     }
 
     public function stateCount(): int
     {
-        return count($this->distances);
+        return $this->stateCount;
     }
 
     /**

@@ -174,13 +174,13 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
         $this->validate([
             'observationPosition' => ['required', 'integer'],
             'observationDirection' => ['required', 'in:<,>'],
-            'observationBefore' => ['required', 'regex:/^[1-7]{4,6}$/'],
-            'observationAfter' => ['required', 'regex:/^[1-7]{4,6}$/'],
+            'observationBefore' => ['required', 'regex:/^[1-7]{4,7}$/'],
+            'observationAfter' => ['required', 'regex:/^[1-7]{4,7}$/'],
         ], [
             'observationBefore.required' => __('Enter the state before the move.'),
-            'observationBefore.regex' => __('States must be 4-6 digits (one per plate), each between 1 and 7.'),
+            'observationBefore.regex' => __('States must be 4-7 digits (one per plate), each between 1 and 7.'),
             'observationAfter.required' => __('Enter the state after the move.'),
-            'observationAfter.regex' => __('States must be 4-6 digits (one per plate), each between 1 and 7.'),
+            'observationAfter.regex' => __('States must be 4-7 digits (one per plate), each between 1 and 7.'),
         ]);
 
         if ($this->observationPosition < 1 || $this->observationPosition > $this->pinCount()) {
@@ -248,13 +248,13 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
         $this->resetResult();
 
         $this->validate([
-            'startPins' => ['required', 'regex:/^[1-7]{4,6}$/'],
+            'startPins' => ['required', 'regex:/^[1-7]{4,7}$/'],
             'moves' => ['required', 'array', 'min:1'],
             'moves.*' => ['required', 'array'],
             'moves.*.*' => ['required', 'integer', 'between:-1,1'],
         ], [
             'startPins.required' => __('Enter a start state.'),
-            'startPins.regex' => __('A lock has 4-6 plates: enter one digit (1-7) per plate.'),
+            'startPins.regex' => __('A lock has 4-7 plates: enter one digit (1-7) per plate.'),
             'moves.required' => __('Define at least one move - observe the lock or enter deltas manually.'),
             'moves.*.*.required' => __('Every plate needs a delta value.'),
             'moves.*.*.between' => __('A plate can only move by -1, 0 or 1.'),
@@ -451,7 +451,7 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
         <flux:field class="max-w-xs">
             <flux:label>{{ __('Pin positions') }}</flux:label>
             <flux:input wire:model.live.debounce.500ms="startPins" placeholder="747317" class="font-mono" />
-            <flux:description>{{ __('One digit (1-7) per plate, 4-6 plates, e.g. 747317. Target is the middle position 4 for every plate.') }}</flux:description>
+            <flux:description>{{ __('One digit (1-7) per plate, 4-7 plates, e.g. 747317. Target is the middle position 4 for every plate.') }}</flux:description>
             <flux:error name="startPins" />
         </flux:field>
     </section>
@@ -468,7 +468,7 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
 
         @if ($moves === [])
             <div class="rounded-lg border border-dashed border-zinc-300 p-6 text-center dark:border-zinc-600">
-                <flux:text>{{ __('Enter the start state first - the moves P1-P6 will be set up automatically.') }}</flux:text>
+                <flux:text>{{ __('Enter the start state first - one move per plate (P1, P2, ...) will be set up automatically.') }}</flux:text>
             </div>
         @else
             <div class="overflow-x-auto">
