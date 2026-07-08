@@ -106,7 +106,9 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
             'observationBefore' => ['required', 'regex:/^[1-7]{4,6}$/'],
             'observationAfter' => ['required', 'regex:/^[1-7]{4,6}$/'],
         ], [
+            'observationBefore.required' => __('Enter the state before the move.'),
             'observationBefore.regex' => __('States must be 4-6 digits (one per plate), each between 1 and 7.'),
+            'observationAfter.required' => __('Enter the state after the move.'),
             'observationAfter.regex' => __('States must be 4-6 digits (one per plate), each between 1 and 7.'),
         ]);
 
@@ -174,7 +176,9 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
             'moves.*' => ['required', 'array'],
             'moves.*.*' => ['required', 'integer', 'between:-1,1'],
         ], [
+            'startPins.required' => __('Enter a start state.'),
             'startPins.regex' => __('A lock has 4-6 plates: enter one digit (1-7) per plate.'),
+            'moves.required' => __('Define at least one move - observe the lock or enter deltas manually.'),
             'moves.*.*.required' => __('Every plate needs a delta value.'),
             'moves.*.*.between' => __('A plate can only move by -1, 0 or 1.'),
         ]);
