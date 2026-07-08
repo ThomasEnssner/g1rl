@@ -141,6 +141,48 @@ test('it resizes the move rows when the plate count changes', function () {
         ->assertSet('observationBefore', '747317');
 });
 
+test('it cycles a delta cell through 0, +1 and -1', function () {
+    Livewire::test('pages::lock-picker')
+        ->set('startPins', '4444')
+        ->call('cycleDelta', 0, 1)
+        // Touching a cell activates the move: the diagonal jumps to +1.
+        ->assertSet('moves.0', [1, 1, 0, 0])
+        ->call('cycleDelta', 0, 1)
+        ->assertSet('moves.0', [1, -1, 0, 0])
+        ->call('cycleDelta', 0, 1)
+        ->assertSet('moves.0', [1, 0, 0, 0]);
+});
+
+test('the diagonal cell toggles the whole move on and off', function () {
+    Livewire::test('pages::lock-picker')
+        ->set('startPins', '4444')
+        ->call('cycleDelta', 1, 1)
+        ->assertSet('moves.1', [0, 1, 0, 0])
+        ->call('cycleDelta', 1, 0)
+        ->assertSet('moves.1', [1, 1, 0, 0])
+        // Toggling off clears the whole row.
+        ->call('cycleDelta', 1, 1)
+        ->assertSet('moves.1', [0, 0, 0, 0]);
+});
+
+test('it ignores delta cycling outside the grid', function () {
+    Livewire::test('pages::lock-picker')
+        ->set('startPins', '4444')
+        ->call('cycleDelta', 7, 0)
+        ->call('cycleDelta', 0, 7)
+        ->assertSet('moves.0', [0, 0, 0, 0]);
+});
+
+test('it toggles the observation direction', function () {
+    Livewire::test('pages::lock-picker')
+        ->set('startPins', '4444')
+        ->assertSet('observationDirection', '>')
+        ->call('toggleObservationDirection')
+        ->assertSet('observationDirection', '<')
+        ->call('toggleObservationDirection')
+        ->assertSet('observationDirection', '>');
+});
+
 test('it discovers a move from an observation', function () {
     Livewire::test('pages::lock-picker')
         ->set('startPins', '747317')

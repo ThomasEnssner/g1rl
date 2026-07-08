@@ -11,6 +11,8 @@ of moves that opens the lock.
 
 ![Screenshot](.github/art/screenshot.png)
 
+*The UI follows your browser language — English and German are included.*
+
 ## The game model
 
 - A lock has **4–6 plates**. Every plate sits in one of **7 positions** (1–7).

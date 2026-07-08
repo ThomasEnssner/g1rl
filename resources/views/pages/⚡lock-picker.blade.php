@@ -96,6 +96,45 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
         $this->syncLockCode();
     }
 
+    public function toggleObservationDirection(): void
+    {
+        $this->observationDirection = $this->observationDirection === '>' ? '<' : '>';
+    }
+
+    /**
+     * Cycles a delta cell through 0 -> +1 -> -1 -> 0. The diagonal cell is
+     * special: Pn> always raises plate n itself by 1, so it toggles the
+     * whole move on and off, and touching any other cell activates the move.
+     */
+    public function cycleDelta(int $row, int $pin): void
+    {
+        if (! isset($this->moves[$row][$pin])) {
+            return;
+        }
+
+        $this->resetResult();
+
+        if ($row === $pin) {
+            $wasActive = (int) $this->moves[$row][$row] === 1;
+
+            $this->moves[$row] = array_fill(0, $this->pinCount(), 0);
+
+            if (! $wasActive) {
+                $this->moves[$row][$row] = 1;
+            }
+        } else {
+            $this->moves[$row][$pin] = match ((int) $this->moves[$row][$pin]) {
+                0 => 1,
+                1 => -1,
+                default => 0,
+            };
+
+            $this->moves[$row][$row] = 1;
+        }
+
+        $this->syncLockCode();
+    }
+
     public function discoverMove(): void
     {
         $this->resetResult();
@@ -346,7 +385,7 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
         <div>
             <flux:heading size="lg" level="2">{{ __('Moves') }}</flux:heading>
             <flux:text size="sm" class="mt-1">
-                {{ __('One move per plate position. Deltas describe the ">" direction - the "<" direction always mirrors it and is added automatically. Pn> always raises plate n itself by 1 (highlighted cell).') }}
+                {{ __('One move per plate position. Deltas describe the ">" direction - the "<" direction always mirrors it and is added automatically. Click a cell to cycle its delta; the highlighted diagonal cell (Pn> raises plate n by 1) switches the whole move on or off.') }}
             </flux:text>
         </div>
 
@@ -367,21 +406,43 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
 
                 <flux:table.rows>
                     @foreach ($moves as $index => $delta)
+                        @php
+                            $rowActive = (int) ($delta[$index] ?? 0) === 1;
+                        @endphp
+
                         <flux:table.row wire:key="move-{{ $index }}">
                             <flux:table.cell>
-                                <span class="font-mono font-semibold">P{{ $index + 1 }}</span>
+                                <span class="font-mono font-semibold {{ $rowActive ? '' : 'opacity-40' }}">P{{ $index + 1 }}</span>
                             </flux:table.cell>
 
                             @foreach ($delta as $pin => $value)
-                                <flux:table.cell wire:key="move-{{ $index }}-pin-{{ $pin }}" class="{{ $index === $pin ? 'bg-amber-500/10' : '' }}">
-                                    <flux:input
-                                        type="number"
-                                        min="-1"
-                                        max="1"
-                                        wire:model.change="moves.{{ $index }}.{{ $pin }}"
-                                        size="sm"
-                                        class="max-w-20"
-                                    />
+                                @php
+                                    $value = (int) $value;
+                                    $isDiagonal = $index === $pin;
+                                    $cellClasses = match (true) {
+                                        $value === 1 => 'border-emerald-500/50 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
+                                        $value === -1 => 'border-rose-500/50 bg-rose-500/15 text-rose-600 dark:text-rose-400',
+                                        default => 'border-zinc-200 text-zinc-400 dark:border-zinc-600 dark:text-zinc-500',
+                                    };
+                                @endphp
+
+                                <flux:table.cell wire:key="move-{{ $index }}-pin-{{ $pin }}" class="{{ $isDiagonal ? 'bg-amber-500/10' : '' }}">
+                                    <button
+                                        type="button"
+                                        wire:click="cycleDelta({{ $index }}, {{ $pin }})"
+                                        class="flex size-9 cursor-pointer items-center justify-center rounded-md border transition-colors hover:border-zinc-400 dark:hover:border-zinc-400 {{ $cellClasses }} {{ $rowActive || $isDiagonal ? '' : 'opacity-50' }}"
+                                        aria-label="{{ $isDiagonal
+                                            ? __('Toggle move :move', ['move' => 'P'.($index + 1).'>'])
+                                            : __('Delta of move :move on plate :plate', ['move' => 'P'.($index + 1).'>', 'plate' => $pin + 1]) }}"
+                                    >
+                                        @if ($value === 1)
+                                            <flux:icon.chevron-right class="size-4" />
+                                        @elseif ($value === -1)
+                                            <flux:icon.chevron-left class="size-4" />
+                                        @else
+                                            <span class="text-lg leading-none">·</span>
+                                        @endif
+                                    </button>
                                 </flux:table.cell>
                             @endforeach
                         </flux:table.row>
@@ -410,10 +471,18 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
 
                     <flux:field>
                         <flux:label>{{ __('Direction') }}</flux:label>
-                        <flux:select wire:model="observationDirection" size="sm" class="max-w-20">
-                            <flux:select.option value=">">&gt;</flux:select.option>
-                            <flux:select.option value="<">&lt;</flux:select.option>
-                        </flux:select>
+                        <button
+                            type="button"
+                            wire:click="toggleObservationDirection"
+                            class="flex size-8 cursor-pointer items-center justify-center rounded-md border border-zinc-200 text-zinc-600 transition-colors hover:border-zinc-400 dark:border-zinc-600 dark:text-zinc-300 dark:hover:border-zinc-400"
+                            aria-label="{{ __('Toggle direction') }}"
+                        >
+                            @if ($observationDirection === '>')
+                                <flux:icon.chevron-right class="size-4" />
+                            @else
+                                <flux:icon.chevron-left class="size-4" />
+                            @endif
+                        </button>
                         <flux:error name="observationDirection" />
                     </flux:field>
 
