@@ -54,9 +54,12 @@ test('it solves the 747317 example with the shortest path', function () {
         ->call('solve')
         ->assertHasNoErrors()
         ->assertSet('hasResult', true)
-        ->assertSet('solvable', true)
-        ->assertCount('solutionMoves', 13)
-        ->assertSee('Statistics');
+        // No observations were made, so there is only the start solution.
+        ->assertCount('solutions', 1)
+        ->assertSet('solutions.0.solvable', true)
+        ->assertCount('solutions.0.moves', 13)
+        ->assertSee('Solution from the start state (747317)')
+        ->assertSee('Visited states');
 });
 
 test('it rejects an invalid start state', function (string $startPins) {
@@ -102,7 +105,7 @@ test('it reports an impossible lock', function () {
         ->call('solve')
         ->assertHasNoErrors()
         ->assertSet('hasResult', true)
-        ->assertSet('solvable', false)
+        ->assertSet('solutions.0.solvable', false)
         ->assertSee('This lock is impossible');
 });
 
@@ -114,8 +117,8 @@ test('it generates the mirrored direction for every move', function () {
         ->set('moves.0', [1, 0, 0, 0])
         ->call('solve')
         ->assertHasNoErrors()
-        ->assertSet('solvable', true)
-        ->assertSet('solutionMoves', ['P1<', 'P1<', 'P1<']);
+        ->assertSet('solutions.0.solvable', true)
+        ->assertSet('solutions.0.moves', ['P1<', 'P1<', 'P1<']);
 });
 
 test('it rejects a move that does not raise its own plate', function (array $delta) {
@@ -355,7 +358,35 @@ test('it prepares the solution states for the animation', function () {
         ->set('moves.0', [1, 0, 0, 0])
         ->call('solve')
         ->assertHasNoErrors()
-        ->assertSet('solutionMoves', ['P1>'])
-        ->assertSet('solutionStates', [[3, 4, 4, 4], [4, 4, 4, 4]])
+        ->assertSet('solutions.0.moves', ['P1>'])
+        ->assertSet('solutions.0.states', [[3, 4, 4, 4], [4, 4, 4, 4]])
         ->assertSee('Play');
+});
+
+test('it additionally solves from the current position after observations', function () {
+    Livewire::test('pages::lock-picker')
+        ->set('startPins', '3444')
+        // P1>: 3444 -> 4444, P2>: 4444 -> 4544. The lock now sits at 4544.
+        ->set('observationAfter', '4444')
+        ->call('discoverMove')
+        ->set('observationAfter', '4544')
+        ->call('discoverMove')
+        ->call('solve')
+        ->assertHasNoErrors()
+        ->assertCount('solutions', 2)
+        ->assertSet('solutions.0.origin', 'start')
+        ->assertSet('solutions.0.moves', ['P1>'])
+        ->assertSet('solutions.1.origin', 'current')
+        ->assertSet('solutions.1.startPins', '4544')
+        ->assertSet('solutions.1.moves', ['P2<'])
+        ->assertSee('Solution from the current position (4544)');
+});
+
+test('it skips the extra solution when the lock still sits at the start', function () {
+    Livewire::test('pages::lock-picker')
+        ->set('startPins', '3444')
+        ->set('moves.0', [1, 0, 0, 0])
+        ->call('solve')
+        ->assertCount('solutions', 1)
+        ->assertDontSee('Solution from the current position');
 });

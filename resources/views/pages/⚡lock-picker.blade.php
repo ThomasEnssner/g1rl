@@ -37,26 +37,17 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
 
     public string $observationAfter = '';
 
-    /** @var list<string> */
-    public array $solutionMoves = [];
-
     /**
-     * Every state along the solution, including start and solved state.
-     * Drives the client-side playback animation.
+     * Solver results, one entry per starting point: always the lock's start
+     * state, plus the current position when observations moved the lock away
+     * from it. Each entry carries the path, the replayed states for the
+     * playback animation, and the search statistics.
      *
-     * @var list<list<int>>
+     * @var list<array{origin: string, startPins: string, solvable: bool, moves: list<string>, states: list<list<int>>, visitedStates: int, iterations: int, durationMs: float}>
      */
-    public array $solutionStates = [];
+    public array $solutions = [];
 
     public bool $hasResult = false;
-
-    public bool $solvable = false;
-
-    public int $visitedStates = 0;
-
-    public int $iterations = 0;
-
-    public float $durationMs = 0.0;
 
     public function mount(): void
     {
@@ -250,29 +241,48 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
                 return;
             }
 
-            $lock = new Lock(State::fromString($this->startPins), $domainMoves);
+            $this->solutions[] = $this->runSolver(new Lock(State::fromString($this->startPins), $domainMoves), 'start');
+
+            // The observations moved the lock along - additionally solve from
+            // where it is right now (the "after" state of the last observation).
+            $current = trim($this->observationBefore);
+
+            if ($current !== trim($this->startPins)
+                && strlen($current) === $this->pinCount()
+                && preg_match('/^[1-7]+$/', $current) === 1) {
+                $this->solutions[] = $this->runSolver(new Lock(State::fromString($current), $domainMoves), 'current');
+            }
         } catch (InvalidArgumentException $exception) {
             $this->addError('moves', $exception->getMessage());
+            $this->reset('solutions');
 
             return;
         }
 
+        $this->hasResult = true;
+    }
+
+    /**
+     * @return array{origin: string, startPins: string, solvable: bool, moves: list<string>, states: list<list<int>>, visitedStates: int, iterations: int, durationMs: float}
+     */
+    private function runSolver(Lock $lock, string $origin): array
+    {
         $startedAt = hrtime(true);
         $solution = new Solver()->solve($lock);
-        $this->durationMs = round((hrtime(true) - $startedAt) / 1_000_000, 2);
+        $durationMs = round((hrtime(true) - $startedAt) / 1_000_000, 2);
 
-        $this->hasResult = true;
-        $this->solvable = $solution->isSolvable();
-        $this->solutionMoves = $solution->moveNames();
-        $this->visitedStates = $solution->visitedStates;
-        $this->iterations = $solution->iterations;
-
-        if ($solution->isSolvable()) {
-            $this->solutionStates = array_map(
-                static fn (State $state): array => $state->pins,
-                $solution->replay($lock->startState),
-            );
-        }
+        return [
+            'origin' => $origin,
+            'startPins' => $lock->startState->hash(),
+            'solvable' => $solution->isSolvable(),
+            'moves' => $solution->moveNames(),
+            'states' => $solution->isSolvable()
+                ? array_map(static fn (State $state): array => $state->pins, $solution->replay($lock->startState))
+                : [],
+            'visitedStates' => $solution->visitedStates,
+            'iterations' => $solution->iterations,
+            'durationMs' => $durationMs,
+        ];
     }
 
     public function pinCount(): int
@@ -284,7 +294,7 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
 
     private function resetResult(): void
     {
-        $this->reset('hasResult', 'solvable', 'solutionMoves', 'solutionStates', 'visitedStates', 'iterations', 'durationMs');
+        $this->reset('hasResult', 'solutions');
         $this->resetErrorBag();
     }
 
@@ -531,22 +541,39 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
         </div>
 
         @if ($hasResult)
-            @if ($solvable)
-                <div class="flex flex-col gap-4">
-                    <flux:heading size="lg" level="2">{{ __('Solution') }}</flux:heading>
+            @foreach ($solutions as $solutionIndex => $result)
+            <div class="flex flex-col gap-4" wire:key="result-{{ $solutionIndex }}">
+                <div>
+                    <flux:heading size="lg" level="2">
+                        {{ $result['origin'] === 'start'
+                            ? __('Solution from the start state (:state)', ['state' => $result['startPins']])
+                            : __('Solution from the current position (:state)', ['state' => $result['startPins']]) }}
+                    </flux:heading>
 
-                    @if ($solutionMoves === [])
-                        <flux:callout icon="check-circle" variant="success">
-                            <flux:callout.text>{{ __('The lock is already open - every pin starts at 4.') }}</flux:callout.text>
-                        </flux:callout>
-                    @else
+                    @if ($result['origin'] === 'current')
+                        <flux:text size="sm" class="mt-1">
+                            {{ __('Your observations moved the lock - this is the shortest path from where it is right now, the "after" state of your last observation.') }}
+                        </flux:text>
+                    @endif
+                </div>
+
+                @if (! $result['solvable'])
+                    <flux:callout icon="exclamation-triangle" variant="warning">
+                        <flux:callout.heading>{{ __('This lock is impossible') }}</flux:callout.heading>
+                        <flux:callout.text>{{ __('The solver explored every reachable state, but none of them opens the lock.') }}</flux:callout.text>
+                    </flux:callout>
+                @elseif ($result['moves'] === [])
+                    <flux:callout icon="check-circle" variant="success">
+                        <flux:callout.text>{{ __('The lock is already open - every pin starts at 4.') }}</flux:callout.text>
+                    </flux:callout>
+                @else
                         <flux:text>
-                            {{ trans_choice('{1} Shortest solution: :count move.|[2,*] Shortest solution: :count moves.', count($solutionMoves), ['count' => count($solutionMoves)]) }}
+                            {{ trans_choice('{1} Shortest solution: :count move.|[2,*] Shortest solution: :count moves.', count($result['moves']), ['count' => count($result['moves'])]) }}
                         </flux:text>
 
                         <div class="flex flex-wrap items-center gap-2">
-                            @foreach ($solutionMoves as $step => $name)
-                                <flux:badge size="lg" wire:key="solution-{{ $step }}">
+                            @foreach ($result['moves'] as $step => $name)
+                                <flux:badge size="lg" wire:key="solution-{{ $solutionIndex }}-{{ $step }}">
                                     <span class="me-1.5 text-xs text-zinc-400">{{ $step + 1 }}.</span>
                                     <span class="font-mono">{{ $name }}</span>
                                 </flux:badge>
@@ -554,10 +581,10 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
                         </div>
 
                         <div
-                            wire:key="player-{{ md5(json_encode($solutionStates)) }}"
+                            wire:key="player-{{ $solutionIndex }}-{{ md5(json_encode($result['states'])) }}"
                             x-data="{
-                                states: @js($solutionStates),
-                                moves: @js($solutionMoves),
+                                states: @js($result['states']),
+                                moves: @js($result['moves']),
                                 step: 0,
                                 playing: false,
                                 timer: null,
@@ -612,33 +639,15 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
                                 </template>
                             </div>
                         </div>
-                    @endif
-                </div>
-            @else
-                <flux:callout icon="exclamation-triangle" variant="warning">
-                    <flux:callout.heading>{{ __('This lock is impossible') }}</flux:callout.heading>
-                    <flux:callout.text>{{ __('The solver explored every reachable state, but none of them opens the lock.') }}</flux:callout.text>
-                </flux:callout>
-            @endif
+                @endif
 
-            <div class="flex flex-col gap-4">
-                <flux:heading size="lg" level="2">{{ __('Statistics') }}</flux:heading>
-
-                <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                    <div class="rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
-                        <flux:text size="sm">{{ __('Visited states') }}</flux:text>
-                        <flux:heading size="lg">{{ number_format($visitedStates) }}</flux:heading>
-                    </div>
-                    <div class="rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
-                        <flux:text size="sm">{{ __('Iterations') }}</flux:text>
-                        <flux:heading size="lg">{{ number_format($iterations) }}</flux:heading>
-                    </div>
-                    <div class="rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
-                        <flux:text size="sm">{{ __('Duration') }}</flux:text>
-                        <flux:heading size="lg">{{ $durationMs }} ms</flux:heading>
-                    </div>
-                </div>
+                <flux:text size="sm">
+                    {{ __('Visited states') }}: {{ number_format($result['visitedStates']) }}
+                    · {{ __('Iterations') }}: {{ number_format($result['iterations']) }}
+                    · {{ __('Duration') }}: {{ $result['durationMs'] }} ms
+                </flux:text>
             </div>
+            @endforeach
         @endif
     </section>
 </div>
