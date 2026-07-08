@@ -1,5 +1,6 @@
 <?php
 
+use App\Gothic\DistanceMap;
 use App\Gothic\Lock;
 use App\Gothic\LockCodec;
 use App\Gothic\Move;
@@ -38,16 +39,30 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
     public string $observationAfter = '';
 
     /**
+     * Undo stack for observations: what the touched row and the "before"
+     * field looked like right before each discovery.
+     *
+     * @var list<array{position: int, previousDelta: list<int>, previousBefore: string}>
+     */
+    public array $observationHistory = [];
+
+    /**
      * Solver results, one entry per starting point: always the lock's start
      * state, plus the current position when observations moved the lock away
-     * from it. Each entry carries the path, the replayed states for the
-     * playback animation, and the search statistics.
+     * from it. Each entry carries the path and the replayed states for the
+     * playback animation. All entries are answered by one shared DistanceMap.
      *
-     * @var list<array{origin: string, startPins: string, solvable: bool, moves: list<string>, states: list<list<int>>, visitedStates: int, iterations: int, durationMs: float}>
+     * @var list<array{origin: string, startPins: string, solvable: bool, moves: list<string>, states: list<list<int>>}>
      */
     public array $solutions = [];
 
     public bool $hasResult = false;
+
+    public int $visitedStates = 0;
+
+    public int $iterations = 0;
+
+    public float $durationMs = 0.0;
 
     public function mount(): void
     {
@@ -69,6 +84,7 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
     public function updatedStartPins(): void
     {
         $this->resetResult();
+        $this->reset('observationHistory');
 
         if ($this->pinCount() > 0) {
             $this->moves = $this->normalizeRows($this->moves);
@@ -90,6 +106,31 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
     public function toggleObservationDirection(): void
     {
         $this->observationDirection = $this->observationDirection === '>' ? '<' : '>';
+    }
+
+    /**
+     * Reverts the last observation: restores the touched row and the
+     * "before" field, so the observation can simply be redone.
+     */
+    public function undoObservation(): void
+    {
+        $last = array_pop($this->observationHistory);
+
+        if ($last === null) {
+            return;
+        }
+
+        $this->resetResult();
+
+        if (isset($this->moves[$last['position'] - 1])) {
+            $this->moves[$last['position'] - 1] = $last['previousDelta'];
+        }
+
+        $this->observationBefore = $last['previousBefore'];
+        $this->observationPosition = $last['position'];
+        $this->reset('observationAfter', 'observationDirection');
+
+        $this->syncLockCode();
     }
 
     /**
@@ -186,6 +227,12 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
             $observed = $observed->inverted($observed->name);
         }
 
+        $this->observationHistory[] = [
+            'position' => $this->observationPosition,
+            'previousDelta' => array_map(intval(...), array_values($this->moves[$this->observationPosition - 1])),
+            'previousBefore' => $this->observationBefore,
+        ];
+
         $this->moves[$this->observationPosition - 1] = $observed->delta;
 
         // The lock is now in the "after" state - chain the next observation from there.
@@ -241,7 +288,9 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
                 return;
             }
 
-            $this->solutions[] = $this->runSolver(new Lock(State::fromString($this->startPins), $domainMoves), 'start');
+            $lock = new Lock(State::fromString($this->startPins), $domainMoves);
+
+            $origins = [['start', $lock->startState]];
 
             // The observations moved the lock along - additionally solve from
             // where it is right now (the "after" state of the last observation).
@@ -250,8 +299,20 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
             if ($current !== trim($this->startPins)
                 && strlen($current) === $this->pinCount()
                 && preg_match('/^[1-7]+$/', $current) === 1) {
-                $this->solutions[] = $this->runSolver(new Lock(State::fromString($current), $domainMoves), 'current');
+                $origins[] = ['current', State::fromString($current)];
             }
+
+            // One backwards search from the target answers every origin.
+            $startedAt = hrtime(true);
+            $map = new Solver()->map($lock);
+
+            foreach ($origins as [$origin, $state]) {
+                $this->solutions[] = $this->solutionEntry($map, $lock, $state, $origin);
+            }
+
+            $this->durationMs = round((hrtime(true) - $startedAt) / 1_000_000, 2);
+            $this->visitedStates = $map->stateCount();
+            $this->iterations = $map->iterations;
         } catch (InvalidArgumentException $exception) {
             $this->addError('moves', $exception->getMessage());
             $this->reset('solutions');
@@ -263,25 +324,29 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
     }
 
     /**
-     * @return array{origin: string, startPins: string, solvable: bool, moves: list<string>, states: list<list<int>>, visitedStates: int, iterations: int, durationMs: float}
+     * @return array{origin: string, startPins: string, solvable: bool, moves: list<string>, states: list<list<int>>}
      */
-    private function runSolver(Lock $lock, string $origin): array
+    private function solutionEntry(DistanceMap $map, Lock $lock, State $start, string $origin): array
     {
-        $startedAt = hrtime(true);
-        $solution = new Solver()->solve($lock);
-        $durationMs = round((hrtime(true) - $startedAt) / 1_000_000, 2);
+        $path = $map->pathFrom($start, $lock->moves);
+        $states = [];
+
+        if ($path !== null) {
+            $states[] = $start->pins;
+            $state = $start;
+
+            foreach ($path as $move) {
+                $state = $state->apply($move);
+                $states[] = $state->pins;
+            }
+        }
 
         return [
             'origin' => $origin,
-            'startPins' => $lock->startState->hash(),
-            'solvable' => $solution->isSolvable(),
-            'moves' => $solution->moveNames(),
-            'states' => $solution->isSolvable()
-                ? array_map(static fn (State $state): array => $state->pins, $solution->replay($lock->startState))
-                : [],
-            'visitedStates' => $solution->visitedStates,
-            'iterations' => $solution->iterations,
-            'durationMs' => $durationMs,
+            'startPins' => $start->hash(),
+            'solvable' => $path !== null,
+            'moves' => array_map(static fn (Move $move): string => $move->name, $path ?? []),
+            'states' => $states,
         ];
     }
 
@@ -294,7 +359,7 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
 
     private function resetResult(): void
     {
-        $this->reset('hasResult', 'solutions');
+        $this->reset('hasResult', 'solutions', 'visitedStates', 'iterations', 'durationMs');
         $this->resetErrorBag();
     }
 
@@ -406,6 +471,7 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
                 <flux:text>{{ __('Enter the start state first - the moves P1-P6 will be set up automatically.') }}</flux:text>
             </div>
         @else
+            <div class="overflow-x-auto">
             <flux:table>
                 <flux:table.columns>
                     <flux:table.column>{{ __('Move') }}</flux:table.column>
@@ -459,6 +525,7 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
                     @endforeach
                 </flux:table.rows>
             </flux:table>
+            </div>
 
             <div class="flex flex-col gap-4 rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
                 <div>
@@ -498,19 +565,25 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
 
                     <flux:field>
                         <flux:label>{{ __('Before') }}</flux:label>
-                        <flux:input wire:model="observationBefore" placeholder="747317" size="sm" class="max-w-32 font-mono" />
+                        <flux:input wire:model="observationBefore" wire:keydown.enter="discoverMove" placeholder="747317" size="sm" class="max-w-32 font-mono" />
                         <flux:error name="observationBefore" />
                     </flux:field>
 
                     <flux:field>
                         <flux:label>{{ __('After') }}</flux:label>
-                        <flux:input wire:model="observationAfter" placeholder="647327" size="sm" class="max-w-32 font-mono" />
+                        <flux:input wire:model="observationAfter" wire:keydown.enter="discoverMove" placeholder="647327" size="sm" class="max-w-32 font-mono" />
                         <flux:error name="observationAfter" />
                     </flux:field>
 
                     <flux:button icon="sparkles" size="sm" wire:click="discoverMove" class="mt-6">
                         {{ __('Add from observation') }}
                     </flux:button>
+
+                    @if ($observationHistory !== [])
+                        <flux:button icon="arrow-uturn-left" size="sm" variant="ghost" wire:click="undoObservation" class="mt-6">
+                            {{ __('Undo last observation') }}
+                        </flux:button>
+                    @endif
                 </div>
             </div>
         @endif
@@ -569,16 +642,8 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
                 @else
                         <flux:text>
                             {{ trans_choice('{1} Shortest solution: :count move.|[2,*] Shortest solution: :count moves.', count($result['moves']), ['count' => count($result['moves'])]) }}
+                            {{ __('Click the moves as you perform them in the game - the pins below follow along.') }}
                         </flux:text>
-
-                        <div class="flex flex-wrap items-center gap-2">
-                            @foreach ($result['moves'] as $step => $name)
-                                <flux:badge size="lg" wire:key="solution-{{ $solutionIndex }}-{{ $step }}">
-                                    <span class="me-1.5 text-xs text-zinc-400">{{ $step + 1 }}.</span>
-                                    <span class="font-mono">{{ $name }}</span>
-                                </flux:badge>
-                            @endforeach
-                        </div>
 
                         <div
                             wire:key="player-{{ $solutionIndex }}-{{ md5(json_encode($result['states'])) }}"
@@ -599,55 +664,80 @@ new #[Layout('layouts::public')] #[Title('Gothic 1 Remake Lockpicker')] class ex
                                 stepForward() { this.pause(); if (! this.done) this.step++ },
                                 stepBack() { this.pause(); if (this.step > 0) this.step-- },
                                 restart() { this.pause(); this.step = 0 },
+                                toggleStep(index) { this.pause(); this.step = this.step === index + 1 ? index : index + 1 },
                             }"
-                            class="flex flex-col gap-6 rounded-lg border border-zinc-200 p-6 dark:border-zinc-700"
+                            class="flex flex-col gap-6"
                         >
+                            {{-- Play-along: click a move to mark everything up to it as done. --}}
                             <div class="flex flex-wrap items-center gap-2">
-                                <flux:button size="sm" icon="play" x-show="! playing" x-on:click="play">{{ __('Play') }}</flux:button>
-                                <flux:button size="sm" icon="pause" x-on:click="pause" x-show="playing" style="display: none;">{{ __('Pause') }}</flux:button>
-                                <flux:button size="sm" icon="chevron-left" x-on:click="stepBack" aria-label="{{ __('Previous step') }}" />
-                                <flux:button size="sm" icon="chevron-right" x-on:click="stepForward" aria-label="{{ __('Next step') }}" />
-                                <flux:button size="sm" icon="arrow-path" x-on:click="restart" aria-label="{{ __('Restart') }}" />
-
-                                <flux:text class="ms-2 tabular-nums">
-                                    <span x-text="step"></span>/<span x-text="states.length - 1"></span>
-                                    <span class="ms-2 font-mono font-semibold" x-text="step === 0 ? @js(__('Start')) : moves[step - 1]"></span>
-                                </flux:text>
+                                @foreach ($result['moves'] as $step => $name)
+                                    <button
+                                        type="button"
+                                        wire:key="solution-{{ $solutionIndex }}-{{ $step }}"
+                                        x-on:click="toggleStep({{ $step }})"
+                                        :class="step > {{ $step }}
+                                            ? 'border-emerald-500/50 bg-emerald-500/10 text-zinc-400 line-through dark:text-zinc-500'
+                                            : (step === {{ $step }}
+                                                ? 'border-blue-500 ring-1 ring-blue-500/60 text-zinc-800 dark:text-zinc-100'
+                                                : 'border-zinc-200 text-zinc-800 dark:border-zinc-600 dark:text-zinc-100')"
+                                        class="flex cursor-pointer items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm transition-colors"
+                                    >
+                                        <span class="text-xs text-zinc-400">{{ $step + 1 }}.</span>
+                                        <span class="font-mono font-medium">{{ $name }}</span>
+                                    </button>
+                                @endforeach
                             </div>
 
-                            <div class="flex items-start justify-center gap-4 sm:gap-6">
-                                <template x-for="(value, plate) in current" :key="plate">
-                                    <div class="flex flex-col items-center gap-2">
-                                        <div class="relative h-44 w-9 rounded-md bg-zinc-100 dark:bg-zinc-700/40">
-                                            {{-- Target slot: the middle position 4. --}}
-                                            <div
-                                                class="absolute inset-x-0 border-y border-dashed border-amber-500/70 bg-amber-500/10"
-                                                style="top: calc(3 * 100% / 7); height: calc(100% / 7)"
-                                            ></div>
+                            <div class="flex flex-col gap-6 rounded-lg border border-zinc-200 p-6 dark:border-zinc-700">
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <flux:button size="sm" icon="play" x-show="! playing" x-on:click="play">{{ __('Play') }}</flux:button>
+                                    <flux:button size="sm" icon="pause" x-on:click="pause" x-show="playing" style="display: none;">{{ __('Pause') }}</flux:button>
+                                    <flux:button size="sm" icon="chevron-left" x-on:click="stepBack" aria-label="{{ __('Previous step') }}" />
+                                    <flux:button size="sm" icon="chevron-right" x-on:click="stepForward" aria-label="{{ __('Next step') }}" />
+                                    <flux:button size="sm" icon="arrow-path" x-on:click="restart" aria-label="{{ __('Restart') }}" />
 
-                                            {{-- The pin, sliding to its current position. --}}
-                                            <div
-                                                class="absolute inset-x-1 flex items-center justify-center rounded bg-blue-500 text-xs font-semibold text-white transition-[top] duration-500 ease-in-out"
-                                                style="height: calc(100% / 7 - 2px)"
-                                                :style="{ top: `calc(${7 - value} * 100% / 7 + 1px)` }"
-                                            >
-                                                <span x-text="value"></span>
+                                    <flux:text class="ms-2 tabular-nums">
+                                        <span x-text="step"></span>/<span x-text="states.length - 1"></span>
+                                        <span class="ms-2 font-mono font-semibold" x-text="step === 0 ? @js(__('Start')) : moves[step - 1]"></span>
+                                    </flux:text>
+                                </div>
+
+                                {{-- One horizontal rail per plate - pins slide left and right, like in the game. --}}
+                                <div class="flex w-full max-w-xl flex-col gap-2">
+                                    <template x-for="(value, plate) in current" :key="plate">
+                                        <div class="flex items-center gap-3">
+                                            <span class="w-7 shrink-0 font-mono text-sm font-semibold">P<span x-text="plate + 1"></span></span>
+
+                                            <div class="relative h-9 flex-1 rounded-md bg-zinc-100 dark:bg-zinc-700/40">
+                                                {{-- Target slot: the middle position 4. --}}
+                                                <div
+                                                    class="absolute inset-y-0 border-x border-dashed border-amber-500/70 bg-amber-500/10"
+                                                    style="left: calc(3 * 100% / 7); width: calc(100% / 7)"
+                                                ></div>
+
+                                                {{-- The pin, sliding to its current position. --}}
+                                                <div
+                                                    class="absolute inset-y-1 flex items-center justify-center rounded bg-blue-500 text-xs font-semibold text-white transition-[left] duration-500 ease-in-out"
+                                                    style="width: calc(100% / 7 - 2px)"
+                                                    :style="{ left: `calc(${value - 1} * 100% / 7 + 1px)` }"
+                                                >
+                                                    <span x-text="value"></span>
+                                                </div>
                                             </div>
                                         </div>
-                                        <flux:text size="sm">{{ __('Plate') }} <span x-text="plate + 1"></span></flux:text>
-                                    </div>
-                                </template>
+                                    </template>
+                                </div>
                             </div>
                         </div>
                 @endif
-
-                <flux:text size="sm">
-                    {{ __('Visited states') }}: {{ number_format($result['visitedStates']) }}
-                    · {{ __('Iterations') }}: {{ number_format($result['iterations']) }}
-                    · {{ __('Duration') }}: {{ $result['durationMs'] }} ms
-                </flux:text>
             </div>
             @endforeach
+
+            <flux:text size="sm">
+                {{ __('Visited states') }}: {{ number_format($visitedStates) }}
+                · {{ __('Iterations') }}: {{ number_format($iterations) }}
+                · {{ __('Duration') }}: {{ $durationMs }} ms
+            </flux:text>
         @endif
     </section>
 </div>

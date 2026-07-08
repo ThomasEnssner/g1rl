@@ -9,6 +9,8 @@ Enter the start position of a lock and its movement rules — the solver runs a
 breadth first search and always finds the **mathematically shortest** sequence
 of moves that opens the lock.
 
+**Try it live: [g1r-lock.laravel.cloud](https://g1r-lock.laravel.cloud/)**
+
 ![Screenshot](.github/art/screenshot.png)
 
 *The UI follows your browser language — English and German are included.*
@@ -36,11 +38,7 @@ of moves that opens the lock.
 - **Playback animation** — step through the solution and watch the plates
   slide into the target zone.
 - **Shareable locks** — the whole lock definition lives in the URL:
-
-  ```
-  https://<your-host>/?lock=156262~200100~121111~112110~111220~111221~111012
-  ```
-
+  [`/?lock=156262~200100~121111~112110~111220~111221~111012`](https://g1r-lock.laravel.cloud/?lock=156262~200100~121111~112110~111220~111221~111012)
   (a real difficulty 4 lock from the game — the solver opens it in 22 moves)
 - **Statistics** — visited states, iterations and solver duration.
 

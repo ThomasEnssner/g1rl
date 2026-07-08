@@ -32,6 +32,15 @@ test('it respects the browser preference order', function () {
         ->assertDontSee('Startzustand');
 });
 
+test('the landing page carries open graph metadata', function () {
+    $this->get('/')
+        ->assertSuccessful()
+        ->assertSee('property="og:title"', false)
+        ->assertSee('property="og:image"', false)
+        ->assertSee('og-image.png', false)
+        ->assertSee('name="twitter:card"', false);
+});
+
 test('every english source string has a german translation', function () {
     $translations = json_decode(file_get_contents(lang_path('de.json')), true, flags: JSON_THROW_ON_ERROR);
 

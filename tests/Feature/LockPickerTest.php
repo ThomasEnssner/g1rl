@@ -272,6 +272,45 @@ test('it rejects an observation position outside the lock', function () {
         ->assertHasErrors('observationPosition');
 });
 
+test('it can undo the last observation', function () {
+    Livewire::test('pages::lock-picker')
+        ->set('startPins', '3444')
+        ->set('observationAfter', '4444')
+        ->call('discoverMove')
+        ->set('observationAfter', '4544')
+        ->call('discoverMove')
+        ->assertSet('moves.1', [0, 1, 0, 0])
+        ->assertSet('observationBefore', '4544')
+        // Undo the second observation: row P2 and the chained state revert.
+        ->call('undoObservation')
+        ->assertSet('moves.1', [0, 0, 0, 0])
+        ->assertSet('observationBefore', '4444')
+        ->assertSet('observationPosition', 2)
+        // Undo the first observation too - back to square one.
+        ->call('undoObservation')
+        ->assertSet('moves.0', [0, 0, 0, 0])
+        ->assertSet('observationBefore', '3444')
+        ->assertCount('observationHistory', 0);
+});
+
+test('undo without any observation is a no-op', function () {
+    Livewire::test('pages::lock-picker')
+        ->set('startPins', '3444')
+        ->call('undoObservation')
+        ->assertSet('moves.0', [0, 0, 0, 0])
+        ->assertSet('observationBefore', '3444');
+});
+
+test('changing the start state clears the observation history', function () {
+    Livewire::test('pages::lock-picker')
+        ->set('startPins', '3444')
+        ->set('observationAfter', '4444')
+        ->call('discoverMove')
+        ->assertCount('observationHistory', 1)
+        ->set('startPins', '344444')
+        ->assertCount('observationHistory', 0);
+});
+
 test('it validates the observation inputs', function () {
     Livewire::test('pages::lock-picker')
         ->call('discoverMove')
